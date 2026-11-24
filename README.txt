@@ -1,11 +1,8 @@
-Time Pilot DX - milestone 1 (F6 + Superchip skeleton)
+Time Pilot DX - milestone 3 (16-direction ship, 3 player shots with autofire)
 Source: Coleco Time Pilot (USA) 8K F8, md5 fc2104dd2dadf9a6176c1c1c8f87ced9
 
-b0.asm, b1.asm   byte-exact disassembly of the original's two banks (dasm: reassembles identically)
-mk_dx.py         builds Time_Pilot_DX.a26 (16K F6 + Superchip) from them; needs dasm
-cmp.py           frame-by-frame RAM + pixel comparison of two ROMs under the Stella libretro core
-tools/vcsdis.py  tracing disassembler;  tools/lr.py  ctypes libretro frontend (needs stella_libretro.so)
-
-Bank map: 0 logic ($F000), 1 enemy-band kernel ($D000, shifted +$100), 2 top score/attract kernels ($F000),
-3 bottom panel + era icon ($D000). Superchip RAM: write $x000-$x07F, read $x080-$x0FF (unused so far).
-Switch stubs in each bank's unused tail $xFE5-$xFF5; cycle pad PAD1 keeps band timing identical (22 cycles).
+mk_dx.py          builds Time_Pilot_DX.a26 (16K F6 + Superchip); runs gen_m3.py first; needs dasm
+gen_m3.py         ship frames (bank 1 page $D4) + 16-direction tables; shipgen.py rasterizes the in-between frames
+src/m3.asm        DxPre (turning, ship frame, scroll heading) and DxShot (3 shots, autofire, round-robin drawing)
+src/dx_b2.asm     bank 2 far-call dispatcher + Superchip init;  src/dx_ram.h  Superchip RAM map
+b0.asm, b1.asm    byte-exact disassembly of the original;  cmp.py  ROM-vs-ROM frame comparison;  tools/  disassembler + libretro frontend

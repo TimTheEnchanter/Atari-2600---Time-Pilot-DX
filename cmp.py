@@ -13,13 +13,13 @@ def script(n, seed=1):
 def main(a, b, n=6000):
     ea, eb = Emu(a), Emu(b)
     la, lb = set(), set()
-    for e in (ea, eb): e.run(30)
+    for e in (ea, eb): e.run(30, joy=CONST or 0)
     for e in (ea, eb): e.press(3)  # reset switch -> start game
     import ctypes as C
     pa = ea.lib.retro_get_memory_data(2); pb = eb.lib.retro_get_memory_data(2)
     C.memmove(pb, pa, 0x70)          # sync $80-$EF (RNG seed comes from power-on RAM)
     s = script(n); bad = 0
-    j = 0; k = 0; seen = set()
+    j = CONST or 0; k = 0; seen = set()
     for i in range(n):
         if ea.r(0x81) % 8 == 4 and eb.r(0x81) % 8 == 4:
             k += 1
