@@ -1,17 +1,60 @@
 ; Time Pilot DX - M3: 16-direction ship and 3 player shots (bank 2)
 ; Superchip RAM offsets
-D16     = $20           ; ship heading 0-15 (0 = up, clockwise)
-SHD     = $21           ; shot heading x3
-SHX     = $24           ; shot X x3
-SHY     = $27           ; shot Y x3 (0 = free)
-SHOWN   = $2A           ; shot drawn last frame ($FF = none)
-FIRET   = $2B           ; autofire countdown
+D16     = $2A           ; ship heading 0-15 (0 = up, clockwise)
+SHD     = $2B           ; shot heading x3
+SHX     = $2E           ; shot X x3
+SHY     = $31           ; shot Y x3 (0 = free)
+SHOWN   = $34           ; shot drawn last frame ($FF = none)
+FIRET   = $35           ; autofire countdown
 NSHOT   = 3
-SDIR    = $9E           ; zp: 8-way heading used by the original scroll code (alternates for odd headings)
+; enemies: group 0 = the original 4 zero-page slots, group 1 = NEX Superchip slots (EX2/EY2/ES2)
+
+; hit test of shot X against enemy group: {1} x(read) {2} y(read) {3} state(read) {4} state(write) {5} exit label
+    MAC HITG
+.he     LDA   SCR+SHY,X
+        SEC
+        SBC   {2},Y
+        SEC
+        SBC   #HITDY0
+        CMP   #HITDY
+        BCS   .hen
+        LDA   SCR+SHX,X
+        SEC
+        SBC   {1},Y
+        CMP   #HITDX
+        BCC   .xok
+        CMP   #HITDX+8          ; the boss is 16 pixels wide
+        BCS   .hen
+        LDA   {3},Y
+        AND   #$40
+        BEQ   .hen
+.xok    LDA   {1},Y
+        BEQ   .hen
+        LDA   {3},Y
+        BMI   .hen              ; already exploding
+        AND   #$40
+        BEQ   .kill
+        JSR   BossHit           ; boss: one hit point (C = 1 on the last one)
+        BCC   .spent
+.kill   LDA   {3},Y
+        ORA   #$80              ; hit: enemy explodes, shot is spent
+        STA   {4},Y
+.spent  LDA   #0
+        STA   SCW+SHY,X
+        LDA   #$59              ; original hit sound
+        STA   $A2
+        JMP   {5}
+.hen    DEY
+        BPL   .he
+    ENDM
+HITDX   = 11            ; shot x - enemy x in 0..10
+HITDY0  = 2             ; shot y - enemy y in 2..11
+HITDY   = 10           ; zp: 8-way heading used by the original scroll code (alternates for odd headings)
 AUTOF   = 8             ; frames between shots while fire is held
 
 ; ---------------------------------------------------------------- every frame, before LF346
-DxPre   LDA   $80
+DxPre   SUBROUTINE
+        LDA   $80
         CMP   #2
         BNE   .idle
         BIT   $A0
@@ -29,6 +72,10 @@ DxPre   LDA   $80
 .clr    STA   SCW+SHY,X
         DEX
         BPL   .clr
+        LDX   #5                ; extra enemy slots
+.clr2   STA   SCW+EX2,X
+        DEX
+        BPL   .clr2
         LDA   #$FF
         STA   SCW+SHOWN
         BNE   .sync
@@ -89,11 +136,27 @@ DxPre   LDA   $80
 
 ; ---------------------------------------------------------------- play state, right after LF3DC (hit test)
 ; returns A = sound to start on channel 0 (0 = none)
-DxShot  LDX   SCR+SHOWN
-        BMI   .move
-        LDA   $CB               ; LF3DC clears $C9-$CC when the drawn shot hits an enemy
-        BNE   .move
-        STA   SCW+SHY,X
+DxShot  SUBROUTINE
+        ; ---- software hit test: every live shot against every enemy (box from the original's hits)
+        LDA   #0
+        STA   $A2               ; sound to return
+        LDA   $81               ; every other frame (shots move 2 px/frame, the box is 11 x 10)
+        LSR
+        BCC   .hgo
+        JMP   .hdone
+.hgo    LDX   #NSHOT-1
+.hs     LDA   SCR+SHY,X
+        BNE   .hlive
+        JMP   HitNx
+.hlive  LDY   #NENEMY-1
+        HITG  ENX, ENY, ENS, ENS, HitNx
+        LDY   #NEX-1
+        HITG  SCR+EX2, SCR+EY2, SCR+ES2, SCW+ES2, HitNx
+.hn
+HitNx   DEX
+        BMI   .hdone
+        JMP   .hs
+.hdone
 .move   LDX   #NSHOT-1
 .mv     LDA   SCR+SHY,X
         BEQ   .next
@@ -119,11 +182,11 @@ DxShot  LDX   SCR+SHOWN
 .next   DEX
         BPL   .mv
         ; ---- fire (autofire while held)
-        LDY   #0                ; sound to return
         LDX   $93
         LDA   INPT4,X
         BPL   .held
-        STY   SCW+FIRET         ; released: next press fires at once
+        LDA   #0
+        STA   SCW+FIRET         ; released: next press fires at once
         BEQ   .show
 .held   LDA   SCR+FIRET
         BEQ   .shoot
@@ -146,9 +209,12 @@ DxShot  LDX   SCR+SHOWN
         STA   SCW+SHY,X
         LDA   #AUTOF
         STA   SCW+FIRET
-        LDY   #$5F              ; original shot sound
+        LDA   $A2
+        BNE   .show             ; a hit sound wins over the shot sound
+        LDA   #$5F              ; original shot sound
+        STA   $A2
         ; ---- pick the next shot to draw (round robin over live shots)
-.show   STY   $A2
+.show
         LDX   SCR+SHOWN
         LDY   #NSHOT
 .pick   INX
@@ -174,4 +240,91 @@ DxShot  LDX   SCR+SHOWN
         STA   $CC
         STX   SCW+SHOWN
         LDA   $A2
+        RTS
+
+; ---- ship vs enemies / enemy bullets (replaces the hardware test at LF298); A = 1 if the ship is hit
+DxShip  SUBROUTINE
+        LDY   #NENEMY-1
+.e      LDA   ENX,Y
+        BEQ   .n
+        LDA   ENS,Y
+        BMI   .n
+        LDA   ENX,Y
+        SEC
+        SBC   #60
+        CMP   #32               ; enemy x 68..91 (range of the original's hardware hits); boss from 60
+        BCS   .n
+        CMP   #8
+        BCS   .xin
+        LDA   ENS,Y
+        AND   #$40
+        BEQ   .n
+.xin
+        LDA   ENY,Y
+        SEC
+        SBC   #49
+        CMP   #28               ; enemy y 49..76
+        BCS   .n
+        LDA   ENS,Y             ; the plane that rammed the ship explodes too (the boss survives)
+        AND   #$40
+        BNE   .rb
+        LDA   ENS,Y
+        ORA   #$80
+        STA   ENS,Y
+.rb     LDA   #1
+        RTS
+.n      DEY
+        BPL   .e
+        LDY   #NEX-1
+.e2     LDA   SCR+EX2,Y
+        BEQ   .n2
+        SEC
+        SBC   #68
+        CMP   #24
+        BCS   .n2
+        LDA   SCR+ES2,Y
+        BMI   .n2
+        LDA   SCR+EY2,Y
+        SEC
+        SBC   #49
+        CMP   #28
+        BCS   .n2
+        LDA   SCR+ES2,Y
+        ORA   #$80
+        STA   SCW+ES2,Y
+        LDA   #1
+        RTS
+.n2     DEY
+        BPL   .e2
+        LDX   #1
+.b      LDA   $DA,X             ; enemy bullet y (0 = none)
+        BEQ   .bn
+        SEC
+        SBC   #63
+        CMP   #16               ; y 63..78
+        BCS   .bn
+        LDA   $D8,X
+        SEC
+        SBC   #76
+        CMP   #10               ; x 76..85
+        BCS   .bn
+        LDA   #1
+        RTS
+.bn     DEX
+        BPL   .b
+        LDA   #0
+        RTS
+
+; ---- a shot hit the era boss: lose a hit point and blink; C = 1 when it should explode
+BossHit SUBROUTINE
+        LDA   SCR+BOSSHP
+        CMP   #2
+        BCC   .dead
+        SBC   #1
+        STA   SCW+BOSSHP
+        LDA   #12
+        STA   SCW+BOSSFL
+        CLC
+        RTS
+.dead   SEC
         RTS

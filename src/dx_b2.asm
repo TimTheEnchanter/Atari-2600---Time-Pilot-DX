@@ -9,8 +9,18 @@ DISP2   LDA   D2HI,X
 F_SCINIT = 0
 F_PRE   = 1
 F_SHOT  = 2
-D2LO    .byte <(SCInit-1), <(DxPre-1), <(DxShot-1)
-D2HI    .byte >(SCInit-1), >(DxPre-1), >(DxShot-1)
+F_BUILD = 3
+F_CLOUD = 4
+F_SHIP  = 5
+F_ENEMY = 6
+D2LO    .byte <(SCInit-1), <(DxPre-1), <(DxShot-1), <(B3Build-1), <(DxCloudC-1), <(DxShip-1), <(B3Enemy-1)
+D2HI    .byte >(SCInit-1), >(DxPre-1), >(DxShot-1), >(B3Build-1), >(DxCloudC-1), >(DxShip-1), >(B3Enemy-1)
+
+; routines that live in bank 3
+B3Enemy LDX   #1
+        JMP   CALL3
+B3Build LDX   #2
+        JMP   CALL3
 
 ; Clear the Superchip RAM; if it doesn't read back, stop on a red screen (cart set to plain F6).
 SCInit  LDX   #$7F
@@ -37,3 +47,4 @@ SCFail  LDA   #$42
 
     include "m3.asm"
     include "m3_tables.asm"
+    include "m4c.asm"
