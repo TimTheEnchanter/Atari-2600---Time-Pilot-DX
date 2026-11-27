@@ -4,7 +4,7 @@
 ; P0 is vertically delayed: GRP0 for the next row is written late in each line and appears when GRP1 is
 ; written at the start of the next one.  P0 shows the ship in band 4 and enemies elsewhere.
 ; Per-band inputs (built in bank 2): SC arrays P1C/P1HM (HM | REFP1 bit 3), P0C/P0HM (HM | REFP0 bit 3),
-; P0LO/P0HI, COL0;  zp $BF,X P1 lo (era page $F3), $CD,X/$DC,X missile enables, $E8,X cloud row.
+; P0LO (lo-1)/P0HI, COL0, P1HI;  zp $BF,X P1 lo (page P1HI), $CD,X/$DC,X missile enables, $E8,X cloud row.
 ; RESP is written at cycle 5k+17 after WSYNC, exactly as the original's SBC loop did.
 
 LD025   STA   COLUBK
@@ -46,22 +46,24 @@ KT2     STA   WSYNC
         STA   HMOVE             ; 3
         LDA   $BF,X
         STA   $F2               ; 10
+        LDA   SCR+P1HI,X        ;     M6: P1 page per band (enemy page, or another page for specials)
+        STA   $F3               ; 17
         LDA   SCR+P1HM,X
-        STA   REFP1             ; 17
+        STA   REFP1             ; 24
         LDA   SCR+P0HM,X
-        STA   REFP0             ; 24
-        LDA   SCR+P0LO,X
-        STA   $FE               ; 31
+        STA   REFP0             ; 31
+        LDA   SCR+P0LO,X        ;     P0LO holds lo-1: ($FE),Y always fetches the next row
+        STA   $FE               ; 38
         LDA   SCR+P0HI,X
-        STA   $FF               ; 38
+        STA   $FF               ; 45
         LDA   $CD,X
-        STA   $F4               ; 45
+        STA   $F4               ; 52
         LDA   $DC,X
-        STA   $F6               ; 52
-        LDY   #12               ; 54
+        STA   $F6               ; 59
+        LDY   #13               ; 61
         LDA   ($FE),Y
-        STA   GRP0              ; 62  row 12 (shown when GRP1 is written)
-        DEC   $FE               ; 67  from now on ($FE),Y fetches the next row
+        STA   GRP0              ; 69  row 12 (shown when GRP1 is written)
+        DEY                     ; 71  (KLoopB's WSYNC write ends at 74)
 KLoopB  STA   WSYNC         ; B row (even Y): clouds too (same pair as the A row above, except in a band's
         LDA   ($F2),Y           ;   first row, where this replaces the setup lines' row-15 value)
         STA   GRP1              ; 8

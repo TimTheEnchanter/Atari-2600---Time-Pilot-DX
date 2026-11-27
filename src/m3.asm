@@ -326,5 +326,7 @@ BossHit SUBROUTINE
         STA   SCW+BOSSFL
         CLC
         RTS
-.dead   SEC
+.dead   LDA   #0                ; killed: the next era's boss gets full hit points
+        STA   SCW+BOSSHP
+        SEC
         RTS

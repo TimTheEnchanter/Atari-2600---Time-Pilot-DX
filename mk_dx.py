@@ -118,7 +118,7 @@ def TAIL(zp):
     return '        JMP   CALL2'
 
 def main():
-    for g in ('gen_m3.py', 'gen_m4.py', 'gen_m5.py'):
+    for g in ('gen_m3.py', 'gen_m4.py', 'gen_m5.py', 'gen_m7.py'):
         subprocess.run([sys.executable, '-I', os.path.join(HERE, g)], check=True, cwd=HERE, capture_output=True)
     os.makedirs(os.path.join(HERE, 'build'), exist_ok=True)
     h0, b0 = parse(os.path.join(HERE, 'b0.asm'))
@@ -152,6 +152,15 @@ def main():
     # so $F8 now holds LF7D8's own return address -> the boss-kill path (LF7AF) never reached era clear.
     for a, ins in ((0xF7E5, 'STA   $F2'), (0xF7EF, 'CMP   $F2'), (0xF7FC, 'STA   $F2'), (0xF80C, 'ORA   $F2')):
         L = chk(L, a, ins.replace('$F2', '$F8'), ins)
+    # ---- M7 presentation
+    for a in (0xF2F0, 0xF303, 0xF327):                          # sound driver reads the new table (old ids kept)
+        L = chk(L, a, 'LDA   LFF54,Y', 'LDA   SNDT,Y')
+    L = chk(L, 0xF1EB, 'LDA   LFDE0,Y', 'LDA   #J_ERA')            # life/era start: fanfare (DXPRE restarts the drone)
+    i = [k for k, (a, l) in enumerate(L) if a == 0xF1EB][0]; L.insert(i + 1, (0xF1ED, '        NOP                   ; F1ED EA'))
+    L = chk(L, 0xF7F3, 'CMP   #$01', 'JSR   LIFECHK')              # extra lives at 10,000 and 60,000
+    L = chk(L, 0xF7F5, 'BNE   LF811', 'NOP')
+    L = chk(L, 0xF93D, 'LDA   LF98D,Y', 'LDA.w $00B3')            # top-kernel address from $B3/$B4 (DXPRE),
+    L = chk(L, 0xF942, 'LDA   LF990,Y', 'LDA.w $00B4')            # same bytes and cycles as the table loads
     L = patch_bytes(L, 0xF272, [56, 56, 56, 56])                # arcade: 56 kills per era (original 8/16/24/24)
     L = patch_bytes(L, 0xFECD, [0x10, 0x30, 0x50, 0x70, 0x90, 0x70, 0x50, 0x30])  # attract rotation frames
     first = rng(L, 0xF015, 0xF110)                          # reset, frame loop, switches (was in SC RAM page)
@@ -164,15 +173,36 @@ def main():
     src += ['DXINIT  SEI', '        CLD', '        LDX   #$FF', '        TXS',
             '        LDX   #0             ; F_SCINIT', '        JSR   CALL2', '        JMP   LF015',
             'DXPRE   LDX   #1             ; F_PRE: heading, ship frame, scroll heading', '        JSR   CALL2', '        JSR   LF346',
+            '        LDY   $80            ; M7: top kernel for LF8E6 (after LF813, which ANDs $B1-$B5 with $F7)',
+            '        LDA   LF98D,Y', '        STA   $B3', '        LDA   LF990,Y', '        STA   $B4',
+            '        CPY   #2', '        BNE   .tk', '        BIT   $A0', '        BPL   .tk',
+            '        LDA   $81            ; game over: GAME OVER and the score take turns (64 frames each)',
+            '        AND   #$40', '        BEQ   .tk', '        LDA   #$13           ; bank 2 GOKern ($F113)', '        STA   $B3',
+            '        LDA   #$F1', '        STA   $B4',
+            '.tk',
             '        LDX   #6             ; F_ENEMY: extra enemy slots; A = kills to score', '        JSR   CALL2',
             '.sc     CMP   #0', '        BEQ   .scd', '        PHA', '        LDA   #1', '        JSR   LF7D8', '        PLA',
             '        SEC', '        SBC   #1', '        JMP   .sc', '.scd' + DBG('$B7'),
+            '        LDA   $81            ; (not on phase 0: the cloud step needs that vblank time)',
+            '        AND   #7', '        BEQ   .nom6',
+            '        LDA   INTIM          ; and only with vblank time left (not wrapped)', '        CMP   #7', '        BCC   .nom6',
+            '        CMP   #$2B', '        BCS   .nom6',
+            '        LDX   #7             ; F_M6: parachutists, homing missiles, boss bombs; A = BCD points',
+            '        JSR   CALL2', '        BEQ   .nom6', '        PHA', '        JSR   LF7D8', '        PLA',
+            '        CMP   #$10           ; rescue (1000+) -> jingle on channel 1; missile shot down -> hit sound',
+            '        BCC   .m6hit', '        LDA   #J_RESCUE', '        LDX   #1', '        JSR   LF099', '        JMP   .nom6',
+            '.m6hit  LDA   #$59', '        LDX   #0', '        JSR   LF099',
+            '.nom6   LDA   INTIM          ; M7: in play, channel 1 back to the era drone after a jingle',
+            '        CMP   #3', '        BCC   .nodr', '        LDA   $80',
+            '        CMP   #2', '        BNE   .nodr', '        BIT   $A0', '        BMI   .nodr', '        LDA   $98', '        BNE   .nodr',
+            '        LDY   $95', '        LDA   LFDE0,Y', '        LDX   #1', '        JSR   LF099',
+            '.nodr',
             '        LDA   $81            ; cloud rows only change when LF419/LF4B6 ran (frame&7 = 0)',
             '        AND   #7', '        BEQ   .cl', '        AND   #3', '        BNE   .nocl', '        LDA   $80', '        CMP   #2', '        BEQ   .nocl',
             '.cl     LDA   INTIM', '        CMP   #12            ; ~9 x 64 cycles needed', '        BCC   .nocl',
             '        CMP   #$2B           ; wrapped: no time', '        BCS   .nocl',
-            '        LDX   #4             ; F_CLOUD: first cloud rows per band (bank 3)', TAIL('$B3'),
-            '.nocl' + DBG('$B3'), '        RTS',
+            '        LDX   #4             ; F_CLOUD: first cloud rows per band (bank 3)', TAIL('$B9'),
+            '.nocl' + DBG('$B9'), '        RTS',
             'DXOS    JSR   LF0AB          ; overscan: switches, state machine, sound' + DBG('$BC'),
 
             '        LDA   INTIM', '        CMP   #BUILDT        ; not enough overscan left: keep last frame\'s tables', '        BCC   .nob',
@@ -183,7 +213,12 @@ def main():
             '        BEQ   .nosnd', '        LDX   #0', '        JSR   LF099', '.nosnd  RTS',
             'DXSHIP  LDA   $A4            ; ship collisions in software (replaces CXM1P/CXPPMM)',
             '        CMP   #$A0', '        BCS   .noh', '        LDX   #5', '        JSR   CALL2', '        CMP   #0',
-            '        BEQ   .noh', '        JMP   LF2AC', '.noh    JMP   LF2E5']
+            '        BEQ   .noh', '        JMP   LF2AC', '.noh    JMP   LF2E5',
+            '; M7: extra life when the score passes 10,000 or 60,000 (LF7D8: A = new high byte, Y = player, X kept)',
+            'LIFECHK CMP   #$01', '        BEQ   .life', '        CMP   #$06', '        BEQ   .life',
+            '        PLA                  ; no: leave LF7D8 (as its BNE LF811 did)', '        PLA', '        RTS',
+            '.life   TXA', '        PHA', '        LDA   #J_LIFE', '        LDX   #1', '        JSR   LF099', '        PLA', '        TAX', '        RTS',
+            '    include "m7_snd.asm"']
     src += ['    IF . > $FC59', '      ERR', '    ENDIF']
     src += seg(0xC59, 0xFC59, rng(L, 0xFC59, 0xFFE4))
     src += ['    ORG $0FE5', '    RORG $FFE5',
@@ -198,6 +233,9 @@ def main():
     # ---------------- bank 2: top kernels (copy of bank 0) ----------------
     L = sub(b0, 0xFC56, 'JMP   S_BAND')
     L = chk(L, 0xFC18, 'LDA   #$D5', 'LDA   #$D4')            # ship frames now in bank 1 page $D4
+    import json
+    for a, v in sorted(json.load(open(os.path.join(HERE, 'build', 'title_patch.json'))).items()):
+        L = patch_bytes(L, int(a), [v])                         # M7 title: 'TIME DX' / 'PILOT'
     src = list(h0) + ['; ===== DX bank 2: top kernels + DX code =====', '    ORG $0000', '    .byte 0', '    include "dx_ram.h"']
     src += seg(0x103, 0xF103, [(0, '        JSR   DISP2'), (0, '        STA   $1FF6          ; -> bank 0 $F109 RTS'),
                                (0, 'CALL3   STA   $1FF9          ; far call -> bank 3 ($D10C JSR DISP3, $D10F back)')])
@@ -221,6 +259,13 @@ def main():
     src += ['LD1B6   JMP   S_BOT          ; band kernel exit -> bank 3 bottom panel',
             'PAD1    NOP                  ; pad: original bank-switch path took 22 cycles',
             '        NOP', '        NOP', '        BIT   $80', '        JMP   LD025']
+    # M6 parachutist (P0 or P1 via the per-band pages): frame base $D240, rows base+2..base+12 (bottom first);
+    # the kernel reads base-15..base+28 around it, so $D231-$D25C stay zero apart from the art
+    para = [0x24, 0x18, 0x3C, 0x18, 0x24, 0x42, 0x81, 0xDB, 0xFF, 0x7E, 0x3C]
+    blk = [0] * 0x40
+    for i, v in enumerate(para): blk[0x22 + i] = v
+    src += ['    IF . > $D220', '      ERR', '    ENDIF', '    ORG $0220', '    RORG $D220', 'PARGFX']
+    src += ['    .byte ' + ','.join('$%02X' % v for v in blk[i:i + 16]) for i in range(0, 0x40, 16)]
     src += ['    IF . > $D30D', '      ERR', '    ENDIF']
     B1 = split_at(split_at(b1, 0xD400), 0xD4C0)
     src += seg(0x30D, 0xD30D, rng(B1, 0xD30D, 0xD3FF))
@@ -252,8 +297,12 @@ def main():
     src += seg(0x10C, 0xD10C, [(0, '        JSR   DISP3'), (0, '        STA   $1FF8          ; -> bank 2 $F112 RTS')])
     src += ['    include "dx_b3.asm"', '    IF . > $D1B6', '      ERR', '    ENDIF', '    echo "bank 3 free (low area):", ($D1B6 - .)d']
     L = patch_bytes(L, 0xD326, [0xD5] * 5)                    # icon pointers -> icon copies in page $D5
-    L = split_at(split_at(split_at(L, 0xD52C), 0xD59C), 0xD800)
-    src += seg(0x1B6, 0xD1B6, rng(L, 0xD1B6, 0xD52B))
+    L = split_at(split_at(split_at(split_at(split_at(L, 0xD355), 0xD400), 0xD52C), 0xD59C), 0xD800)
+    src += seg(0x1B6, 0xD1B6, rng(L, 0xD1B6, 0xD354))
+    # $D355-$D3FF: bank 3's copy of the warp kernel and sky table is never used -> M6 code
+    src += ['    ORG $0355', '    RORG $D355', '    include "m6b3.asm"', '    IF . > $D400', '      ERR', '    ENDIF',
+            '    echo "bank 3 free (mid area):", ($D400 - .)d']
+    src += seg(0x400, 0xD400, rng(L, 0xD400, 0xD52B))
     src += ['    ORG $052C', '    RORG $D52C', '    include "m5_icons.asm"', '    IF . > $D59C', '      ERR', '    ENDIF']
     src += seg(0x59C, 0xD59C, rng(L, 0xD59C, 0xD7FF))
     src += ['    ORG $0800', '    RORG $D800', '    include "b3big.asm"', '    IF . > $DFE5', '      ERR', '    ENDIF',

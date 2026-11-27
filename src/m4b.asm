@@ -18,16 +18,24 @@ DxEnemy SUBROUTINE
         BNE   .fbg
         DEX
         BPL   .fb
-        LDA   #0                ; no boss on screen
-        STA   SCW+BOSSHP
+        LDA   #0                ; no boss on screen (M8: its hit points survive a lost life)
+        STA   SCW+BOSSDIR
         BEQ   .fl
 .fbg    LDA   ENS,X
         BMI   .fl               ; exploding: leave it alone
-        LDA   SCR+BOSSHP
+        LDA   SCR+BOSSDIR
         BNE   .bh
-        LDY   $95               ; new boss: hit points by era; heads across from the side it entered
+        LDA   SCR+BOSSHP        ; boss (re)appears: fresh hit points only if the last one was killed
+        BNE   .keep
+        LDY   $95               ; hit points by era; heads across from the side it entered
         LDA   BOSSHPT,Y
         STA   SCW+BOSSHP
+.keep
+        LDA   #J_BOSS           ; M7: warning siren on channel 1 (as LF099; DXPRE brings the drone back)
+        STA   $98
+        LDA   #0
+        STA   $9A
+        STA   AUDV1
         LDA   ENX,X
         CMP   #$50
         LDA   #2
@@ -77,6 +85,8 @@ DxEnemy SUBROUTINE
         AND   #63
         CMP   #35               ; original spawns on 3
         BNE   .out
+        JSR   FormSpawn         ; M6: now and then a V formation instead
+        BCS   .out
         JSR   .spawn
 .out    LDA   $A2
         RTS

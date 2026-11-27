@@ -37,7 +37,7 @@ DxCloud SUBROUTINE
         BPL   .l2
     IFCONST DEBUGT
         LDA   INTIM
-        STA   $B3
+        STA   $B9
     ENDIF
         RTS
 

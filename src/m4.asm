@@ -1,13 +1,28 @@
 ; Time Pilot DX - M4 band-table builder (bank 3, $D800 area). Runs every frame after LF346 (and LF813's missile part).
 ; Scratch: $F2 x, $F3 y then band, $F4 state then upper band, $F5 reflect, $F6 frame base, $F7 offset
 ; ($F8-$FF hold the far-call return addresses.)  Fills, per band: P1 (zp $BF lo, SC P1C/P1HM) and P0 (SC P0C/P0HM/P0LO/P0HI), COL0.
-; P1 lo 0 / P0 lo 1 = blank (both point at the blank start of every enemy page).
+; P1 lo 0 / P0LO 0 (lo-1) = blank (both point at the blank start of every enemy page).
 SHIPB   = 4             ; band drawn with the ship on P0
 SHIPX   = $50           ; ship x (the top kernel positions the original ship from $50)
 SHIPC   = 5             ; POSC[$50]
 SHIPHM  = $20           ; POSHM[$50] (checked by gen_m4.py)
 BOSSL   = $C6           ; boss halves in every enemy page (gen_m5.py)
 BOSSR   = $E2
+
+    MAC PG1                     ; parachutist on P1 in band X: its page
+        BIT   $A2
+        BPL   .g1
+        LDA   #PARPG
+        STA   SCW+P1HI,X
+.g1
+    ENDM
+    MAC PG0                     ; parachutist on P0 in band X: its page (enemy colour, as on P1 in the ship band)
+        BIT   $A2
+        BPL   .g0
+        LDA   #PARPG
+        STA   SCW+P0HI,X
+.g0
+    ENDM
 
     MAC SETP1                   ; P1 coarse/HM for band X; band 8's x also goes to $BE (top kernel)
         LDA   $F2
@@ -62,13 +77,15 @@ DxBuild SUBROUTINE
         ADC   #1
         BNE   .pg
 .pg0    LDA   T_PAGE,Y
-.pg     CMP   SCR+P0HI+0        ; page/colour unchanged since last frame?
+.pg     STA   $F5               ; (this frame's page)
+        CMP   SCR+P0HI+0        ; page/colour unchanged since last frame?
         BNE   .newpg
         LDX   T_ECOL,Y
         CPX   SCR+COL0+0
         BEQ   .samepg
 .newpg  LDX   #8
 .pgl    STA   SCW+P0HI,X
+        STA   SCW+P1HI,X
         DEX
         BPL   .pgl
         LDA   T_ECOL,Y           ; enemy colour (original COLUP1)
@@ -80,8 +97,18 @@ DxBuild SUBROUTINE
         STA   SCW+P0HI+SHIPB
         LDA   T_SCOL,Y
         STA   SCW+COL0+SHIPB
-.samepg
-        ; ---- empty bands (unrolled): P1 lo 0, coarse 0, HM of x=0, P0 lo 1 (P0HM bit 0 = band taken)
+.samepg LDX   SCR+PARB          ; M6: give last frame's parachutist bands their enemy page/colour back
+        BMI   .nopb
+        JSR   .rest
+        INX
+        CPX   #9
+        BCC   .pb2
+        LDX   #0
+.pb2    JSR   .rest
+        LDA   #$FF
+        STA   SCW+PARB
+.nopb
+        ; ---- empty bands (unrolled): P1 lo 0, coarse 0, HM of x=0, P0LO 0 (P0HM bit 0 = band taken)
         LDA   #0
         STA   $BE
         STA   $BF
@@ -128,7 +155,7 @@ DxBuild SUBROUTINE
         STA   SCW+P0HM+7
         STA   SCW+P1HM+8
         STA   SCW+P0HM+8
-        LDA   #1
+        LDA   #0                ; (P0LO = lo - 1)
         STA   SCW+P0LO+0
         STA   SCW+P0LO+1
         STA   SCW+P0LO+2
@@ -138,8 +165,9 @@ DxBuild SUBROUTINE
         STA   SCW+P0LO+7
         STA   SCW+P0LO+8
         ; ---- ship on P0 in its band
-        LDA   $A4
-        STA   SCW+P0LO+SHIPB
+        LDX   $A4
+        DEX
+        STX   SCW+P0LO+SHIPB
         LDA   #SHIPC
         STA   SCW+P0C+SHIPB
         LDA   $A3
@@ -197,6 +225,24 @@ DxBuild SUBROUTINE
         ADC   #8
         JSR   .place
 .bdone
+        ; ---- M6 parachutist: P0 preferred (keeps P1 for planes), its own page; remember the band for next frame
+        LDA   INTIM             ; (same time guard as the enemies below)
+        CMP   #7
+        BCC   .nopar
+        LDA   SCR+PARY
+        BEQ   .nopar
+        STA   $F3
+        LDA   #0
+        STA   $F4
+        LDA   #PARBASE
+        STA   $F6
+        LDA   #$FF
+        STA   $A2
+        LDA   SCR+PARX
+        JSR   .place
+        LDA   $F3
+        STA   SCW+PARB
+.nopar
         ; ---- the other enemies: 0-3 original zero-page slots, 4-5 Superchip slots
         LDA   SCR+ROT           ; start with a different enemy each frame
         CLC
@@ -210,7 +256,7 @@ DxBuild SUBROUTINE
         LDY   SCR+ROT
 .en     STY   $A2
         LDA   INTIM             ; out of overscan time: leave the rest out of this frame's tables
-        CMP   #6                ; (one enemy with a spill costs ~4.5 units)
+        CMP   #7                ; (one enemy with a spill costs ~4.5 units, more with M6's page checks)
         BCC   .done
         CPY   #NENEMY
         BCS   .g1
@@ -297,19 +343,22 @@ DxBuild SUBROUTINE
         BCC   .nos
         LDX   #0                ; spills off the top: original wraps it to band 0
 .nos    STX   $F4               ; upper band or $FF
-        LDX   $F3
+        BIT   $A2               ; parachutist ($A2 bit 7): P0 first
+        BMI   .tryp0
+.tryp1  LDX   $F3
         LDA   $BF,X
-        BNE   .tryp0
+        BNE   .p1no
         LDX   $F4
         BMI   .p1
         LDA   $BF,X
-        BNE   .tryp0
+        BNE   .p1no
 .p1     LDX   $F3
         LDA   $F6
         SEC
         SBC   $F7
         STA   $BF,X
         SETP1
+        PG1
         LDX   $F4
         BMI   .prts
         LDA   $F6
@@ -319,30 +368,37 @@ DxBuild SUBROUTINE
         SBC   $F7
         STA   $BF,X
         SETP1
+        PG1
 .prts   RTS
+.p1no   BIT   $A2
+        BMI   .prts             ; parachutist: P0 was tried first
 .tryp0  LDX   $F3
         LDA   SCR+P0HM,X
         LSR
-        BCS   .prts
+        BCS   .p0no
         LDX   $F4
         BMI   .p0
         LDA   SCR+P0HM,X
         LSR
-        BCS   .prts
+        BCC   .p0
+.p0no   BIT   $A2
+        BMI   .tryp1
+        RTS
 .p0     LDX   $F3
         LDA   $F6
-        SEC
+        CLC                     ; P0LO = lo - 1
         SBC   $F7
         STA   SCW+P0LO,X
         LDA   $F2
         STA   SCW+P0C,X
         LDA   $F5
         STA   SCW+P0HM,X
+        PG0
         LDX   $F4
         BMI   .prts
         LDA   $F6
         CLC
-        ADC   #16
+        ADC   #15               ; (lo - 1)
         SEC
         SBC   $F7
         STA   SCW+P0LO,X
@@ -350,7 +406,15 @@ DxBuild SUBROUTINE
         STA   SCW+P0C,X
         LDA   $F5
         STA   SCW+P0HM,X
+        PG0
         RTS
+; restore band X's pages after a parachutist (X kept; $F5 = page)
+.rest   LDA   $F5
+        STA   SCW+P1HI,X
+        CPX   #SHIPB
+        BEQ   .rs
+        STA   SCW+P0HI,X
+.rs     RTS
 
 QUOTA   .byte 56, 56, 56, 56  ; kills per era, indexed by $87 (arcade: 56; original LF272 8/16/24/24)
 QUOTA8  .byte 7, 7, 7, 7

@@ -41,5 +41,16 @@ BOSSHP  = $06           ; boss hits left (0 = no boss)
 BOSSDIR = $07           ; boss heading (2 = right, 6 = left)
 BOSSFL  = $08           ; boss hit-blink countdown
 BOSSB2  = $09           ; builder temp: second half's frame base
+P1HI    = $0A           ; M6: P1 graphics page per band ($0A-$12)
+PARX    = $13           ; M6: parachutist x
+PARY    = $14           ; M6: parachutist y (0 = none)
+PARN    = $15           ; M6: parachutists rescued this life/era (bonus step)
+AIMT    = $17           ; M6: Aim temp (|dx|)
+PARB    = $16           ; M6: band the builder gave the parachutist last frame ($FF = none)
+MAGE    = $7E           ; M6: homing missile ages ($7E-$7F, x8 frames)
+PARPG   = $D2           ; M6: parachutist graphics page (bank 1)
+PARBASE = $40           ; M6: parachutist frame base in that page
+PARCOL  = $1E           ; M6: parachutist colour (P0)
 
     include "dbg.h"
+    include "m7_ids.h"

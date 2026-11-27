@@ -1,1 +1,1 @@
-; release
+DEBUGT = 1
